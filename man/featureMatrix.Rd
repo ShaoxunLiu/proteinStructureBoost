@@ -6,7 +6,7 @@
 \usage{
 featureMatrix(
   positive,
-  negative,
+  negative = NA,
   projectFile = "~/",
   as.file = TRUE,
   balance = FALSE,
