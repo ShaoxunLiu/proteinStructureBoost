@@ -19,17 +19,15 @@ download.pdb <- function(pdbids,
   }else{
     pdb_file <- paste(projectFile, '/',sep = '')
   }
-
-  options(scipen = 999)
   out <- c()
   for(i in 1:length(pdbids)){
     pdbid <- pdbids[i]
-    new <- length(grep(pdbid, list.files(pdb_file))) == 0
+    new <- length(which(paste(pdbid, '.pdb', sep = '') == list.files(pdb_file))) == 0
     dir <- paste(pdb_file, pdbid,".pdb", sep = "")
     if(new){
       tryCatch({
         url <- paste("https://files.rcsb.org/download/", pdbid ,".pdb", sep = "")
-        download.file(url, destfile = dir)
+        download.file(url, destfile = dir, quiet = TRUE)
       },error = function(e) e)
     }
     if(file.exists(dir)){
@@ -39,7 +37,6 @@ download.pdb <- function(pdbids,
     }
 
   }
-  options(scipen = 0)
   return(out)
 }
 
@@ -442,7 +439,7 @@ rotatePDB <- function(pdb, degree = c(0,0,0)){
 #' @export
 featureMatrix <- function(
   positive,
-  negative,
+  negative = NA,
   projectFile = '~/',
   as.file = TRUE,
   balance = FALSE,
@@ -455,6 +452,12 @@ featureMatrix <- function(
   show.grid = FALSE,
   n.feature = 68){
   #function
+  skip.negative <- FALSE
+  if(is.na(negative[1])){
+    negative <- positive
+    balance <- FALSE
+    skip.negative <- TRUE
+  }
   if(balance){
     np <- length(positive)
     nn <- length(negative)
@@ -469,8 +472,9 @@ featureMatrix <- function(
     }
   }
   p_pdbs <- download.pdb(positive, projectFile, as.file)
-  n_pdbs <- download.pdb(negative, projectFile, as.file)
-
+  if(!skip.negative){
+    n_pdbs <- download.pdb(negative, projectFile, as.file)
+  }
   featureMatrix <- data.frame(NULL)
   for(i in 1:length(p_pdbs)){
     grid <- form.grid(pdb.file = p_pdbs[i], size = size, units = units, combine.chains = combine.chains,  show.grid = show.grid)
@@ -493,30 +497,38 @@ featureMatrix <- function(
       }
     }
   }
-  for(i in 1:length(n_pdbs)){
-    grid <- form.grid(pdb.file = n_pdbs[i], size = size, units = units, combine.chains = combine.chains,  show.grid = show.grid)
-    for(j in 1:length(grid)){
-      lbp <- lbp3d(grid[[j]])
-      addLine <- lbp2Feature(lbp, n.feature, label = negative.label)
-      featureMatrix <- rbind.data.frame(featureMatrix, addLine)
-      pdbname <- attr(lbp, 'name')
-    }
-    if(rotations > 0){
-      ppdb <- bio3d::read.pdb(n_pdbs[i])
-      for(k in 1:rotations){
-        rppdb <- rotatePDB(ppdb, degree = sample(c(1:360), 3, replace = TRUE))
-        grid <- form.grid(pdb = rppdb, pdb.name = pdbname, size = size, units = units, combine.chains = combine.chains,  show.grid = show.grid)
-        for(j in 1:length(grid)){
-          lbp <- lbp3d(grid[[j]])
-          addLine <- lbp2Feature(lbp, n.feature, label = negative.label)
-          featureMatrix <- rbind.data.frame(featureMatrix, addLine)
+  if(!skip.negative){
+    for(i in 1:length(n_pdbs)){
+      grid <- form.grid(pdb.file = n_pdbs[i], size = size, units = units, combine.chains = combine.chains,  show.grid = show.grid)
+      for(j in 1:length(grid)){
+        lbp <- lbp3d(grid[[j]])
+        addLine <- lbp2Feature(lbp, n.feature, label = negative.label)
+        featureMatrix <- rbind.data.frame(featureMatrix, addLine)
+        pdbname <- attr(lbp, 'name')
+      }
+      if(rotations > 0){
+        ppdb <- bio3d::read.pdb(n_pdbs[i])
+        for(k in 1:rotations){
+          rppdb <- rotatePDB(ppdb, degree = sample(c(1:360), 3, replace = TRUE))
+          grid <- form.grid(pdb = rppdb, pdb.name = pdbname, size = size, units = units, combine.chains = combine.chains,  show.grid = show.grid)
+          for(j in 1:length(grid)){
+            lbp <- lbp3d(grid[[j]])
+            addLine <- lbp2Feature(lbp, n.feature, label = negative.label)
+            featureMatrix <- rbind.data.frame(featureMatrix, addLine)
+          }
         }
       }
     }
   }
-  cat('Feature Matrix with ', sum(featureMatrix$Label == positive.label), ' positive entries, ',
-      sum(featureMatrix$Label == negative.label), ' negative entries, and ', (ncol(featureMatrix) - 1), ' features is gerneated. \n',
-      sep = '')
+  if(skip.negative){
+    cat('Feature Matrix with ', sum(featureMatrix$Label == positive.label), ' entries, and ',
+        (ncol(featureMatrix) - 1), ' features is gerneated. \n',
+        sep = '')
+  }else{
+    cat('Feature Matrix with ', sum(featureMatrix$Label == positive.label), ' positive entries, ',
+        sum(featureMatrix$Label == negative.label), ' negative entries, and ', (ncol(featureMatrix) - 1), ' features is gerneated. \n',
+        sep = '')
+  }
   return(featureMatrix)
 
 }
@@ -740,5 +752,7 @@ adaboostTrain <- function(featureMatrix,
   }
   attr(BABM,'preAugs') <- preAugs
   attr(BABM,'Augs') <- Augs
+  attr(BABM, 'Train') <- set$Train
+  attr(BABM, 'Test') <- set$Test
   return(BABM)
 }
